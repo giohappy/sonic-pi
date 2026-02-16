@@ -101,9 +101,28 @@ $procIds = Get-NetUDPEndpoint -LocalPort 5000,5001,5002,51234 -ErrorAction Silen
 foreach($procId in $procIds){ Stop-Process -Id $procId -Force }
 ```
 
+## 8) Ableton Link session probe (BPM, measure, phase)
+
+Assumption: at least one other Ableton Link peer is running on the network.
+
+```powershell
+python app/server/beam/tau/tau_demo_cli.py --start-tau --tau-env test --disable-midi --link-test --link-samples 8 --link-interval 1.0 --hold-seconds 1 --lead-time 0.5
+```
+
+Expected Link lines (example):
+- `[link] sample=1 peers=1 bpm=110.000 measure=9 phase=2.217609 beat=34.217609`
+- `[link] sample=2 peers=1 bpm=110.000 measure=9 phase=3.141612 beat=35.141613`
+
+Fields:
+- `bpm`: Link session tempo
+- `measure`: computed as `floor(beat / quantum) + 1` (default `quantum=4.0`)
+- `phase`: current phase inside the quantum
+- `peers`: number of Link peers seen by Tau
+
 ## Confirmation status
 
 - Test-mode E2E: executed and verified.
 - Dev-mode E2E: partially exercised during debugging, but final validated path used test mode.
 - Prod-mode E2E: executed and verified in runtime mode (`MIX_ENV=prod` + `mix run --no-halt`).
 - Prod release binary path (`mix tau.release` + `_build\prod\rel\tau\bin\tau start`): executed and verified after setting `MIX_ENV=prod` correctly in PowerShell.
+- Ableton Link probe (`--link-test`): executed and verified; BPM/measure/phase values printed successfully.

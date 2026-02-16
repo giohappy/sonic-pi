@@ -66,6 +66,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--osc-target-port", type=int, default=9123)
     p.add_argument("--lead-time", type=float, default=2.0)
     p.add_argument("--hold-seconds", type=float, default=8.0)
+    p.add_argument("--link-test", action="store_true", help="Run Ableton Link probe (prints BPM/measure/phase)")
+    p.add_argument("--link-samples", type=int, default=8, help="Number of Link probe samples")
+    p.add_argument("--link-interval", type=float, default=1.0, help="Seconds between Link probe samples")
+    p.add_argument("--link-quantum", type=float, default=4.0, help="Quantum used for measure/phase computation")
     return p.parse_args()
 
 
@@ -96,6 +100,8 @@ def main() -> int:
         client.add_handler("/tau/pid", lambda a: print(f"[daemon] /tau/pid {a}"))
         client.add_handler("/midi-outs", lambda a: print(f"[spider] /midi-outs {a}"))
         client.add_handler("/external-osc-cue", lambda a: print(f"[spider] /external-osc-cue {a}"))
+        client.add_handler("/link-tempo-change", lambda a: print(f"[spider] /link-tempo-change {a}"))
+        client.add_handler("/link-num-peers", lambda a: print(f"[spider] /link-num-peers {a}"))
 
         if not client.wait_for_pong(timeout_s=30.0):
             print("[demo] ERROR: /pong timeout")
@@ -108,6 +114,47 @@ def main() -> int:
             print("[demo] WARNING: daemon PID handshake not received")
         else:
             print(f"[demo] daemon PID handshake OK (/tau/pid={pid})")
+
+        if args.link_test:
+            print(
+                "[demo] running Link probe "
+                f"(samples={args.link_samples}, interval={args.link_interval}s, quantum={args.link_quantum})"
+            )
+            client.send("/link-enable")
+            for i in range(args.link_samples):
+                peers_r = client.api_rpc("/link-get-num-peers", timeout_s=2.0)
+                tempo_r = client.api_rpc("/link-get-tempo", timeout_s=2.0)
+                t_r = client.api_rpc("/link-get-current-time", timeout_s=2.0)
+
+                if peers_r is None or tempo_r is None or t_r is None or len(peers_r) < 1 or len(tempo_r) < 1 or len(t_r) < 1:
+                    print(f"[link] sample={i + 1} rpc-timeout or malformed reply")
+                    time.sleep(args.link_interval)
+                    continue
+
+                peers = int(peers_r[0])
+                bpm = float(tempo_r[0])
+                now_micros = int(t_r[0])
+
+                beat_r = client.api_rpc(
+                    "/link-get-beat-at-time", ("int64", now_micros), float(args.link_quantum), timeout_s=2.0
+                )
+                phase_r = client.api_rpc(
+                    "/link-get-phase-at-time", ("int64", now_micros), float(args.link_quantum), timeout_s=2.0
+                )
+                if beat_r is None or phase_r is None or len(beat_r) < 1 or len(phase_r) < 1:
+                    print(f"[link] sample={i + 1} beat/phase rpc-timeout or malformed reply")
+                    time.sleep(args.link_interval)
+                    continue
+
+                beat = float(beat_r[0])
+                phase = float(phase_r[0])
+                measure = int(beat // args.link_quantum) + 1
+
+                print(
+                    f"[link] sample={i + 1} peers={peers} bpm={bpm:.3f} "
+                    f"measure={measure} phase={phase:.6f} beat={beat:.6f}"
+                )
+                time.sleep(args.link_interval)
 
         fire_at = time.time() + args.lead_time
         print(f"[demo] scheduling timed messages for {fire_at:.3f}")

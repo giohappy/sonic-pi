@@ -18,6 +18,7 @@ import struct
 import subprocess
 import threading
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
@@ -190,6 +191,8 @@ class TauClient:
 
         self._handlers: Dict[str, List[Callable[[List[Any]], None]]] = {}
         self.midi_out_ports: List[str] = []
+        self._rpc_lock = threading.Lock()
+        self._rpc_pending: Dict[str, Tuple[threading.Event, Dict[str, Any]]] = {}
 
         self.spider_thread = threading.Thread(target=self._spider_listener, daemon=True)
         self.daemon_thread = threading.Thread(target=self._daemon_listener, daemon=True)
@@ -303,6 +306,23 @@ class TauClient:
         packet = encode_osc_message(address, list(args))
         self.api_sock.sendto(packet, ("127.0.0.1", self.ports.api_port))
 
+    def api_rpc(self, method: str, *args: Any, timeout_s: float = 3.0) -> Optional[List[Any]]:
+        req_id = str(uuid.uuid4())
+        ev = threading.Event()
+        slot: Dict[str, Any] = {"reply": None}
+        with self._rpc_lock:
+            self._rpc_pending[req_id] = (ev, slot)
+        self.send("/api-rpc", req_id, method, *args)
+        ok = ev.wait(timeout=timeout_s)
+        with self._rpc_lock:
+            self._rpc_pending.pop(req_id, None)
+        if not ok:
+            return None
+        reply = slot.get("reply")
+        if isinstance(reply, list):
+            return reply
+        return None
+
     def send_bundle_at(self, unix_ts: float, messages: Sequence[bytes]) -> None:
         bundle = encode_osc_bundle_at(unix_ts, messages)
         self.api_sock.sendto(bundle, ("127.0.0.1", self.ports.api_port))
@@ -342,6 +362,16 @@ class TauClient:
                 address, args = decode_osc_packet(packet)
             except Exception:
                 continue
+
+            if address == "/tau-api-reply" and len(args) >= 2:
+                req_id = str(args[1])
+                payload = args[2:]
+                with self._rpc_lock:
+                    pending = self._rpc_pending.get(req_id)
+                if pending is not None:
+                    ev, slot = pending
+                    slot["reply"] = payload
+                    ev.set()
 
             if address == "/midi-outs" and len(args) >= 1:
                 self.midi_out_ports = [str(x) for x in args[1:]]
