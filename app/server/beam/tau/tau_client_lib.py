@@ -249,7 +249,14 @@ class TauClient:
         )
 
         sysname = platform.system().lower()
-        if "windows" in sysname:
+        # Tau boot scripts force TAU_MIDI_ENABLED=false in test mode.
+        # Start Tau directly in test mode so caller-provided MIDI flags are honored.
+        if self.runtime.tau_env == "test":
+            if "windows" in sysname:
+                cmd = ["cmd", "/c", "mix run --no-halt"]
+            else:
+                cmd = ["sh", "-lc", "mix run --no-halt"]
+        elif "windows" in sysname:
             cmd = ["cmd", "/c", "boot-win.bat"]
         elif "darwin" in sysname:
             cmd = ["sh", "boot-mac.sh"]
@@ -307,6 +314,11 @@ class TauClient:
 
     def send_timed_midi_note_on(self, unix_ts: float, midi_port_name: str, chan: int, note: int, vel: int) -> None:
         midi_nested = encode_osc_message("/note_on", [midi_port_name, chan, note, vel])
+        cmd = encode_osc_message("/midi-at", [midi_nested])
+        self.send_bundle_at(unix_ts, [cmd])
+
+    def send_timed_midi_note_off(self, unix_ts: float, midi_port_name: str, chan: int, note: int, vel: int = 0) -> None:
+        midi_nested = encode_osc_message("/note_off", [midi_port_name, chan, note, vel])
         cmd = encode_osc_message("/midi-at", [midi_nested])
         self.send_bundle_at(unix_ts, [cmd])
 

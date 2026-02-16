@@ -132,7 +132,14 @@ def main() -> int:
                 note=60,
                 vel=100,
             )
-            print(f"[demo] scheduled timed MIDI /note_on on port: {midi_port}")
+            client.send_timed_midi_note_off(
+                unix_ts=fire_at + 2.0,
+                midi_port_name=midi_port,
+                chan=1,
+                note=60,
+                vel=0,
+            )
+            print(f"[demo] scheduled timed MIDI /note_on and /note_off (+2s) on port: {midi_port}")
         else:
             print("[demo] timed MIDI skipped (no --midi-port and none discovered)")
 

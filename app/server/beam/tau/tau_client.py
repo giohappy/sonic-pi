@@ -252,7 +252,14 @@ class TauClient:
         )
 
         sysname = platform.system().lower()
-        if "windows" in sysname:
+        # Tau boot scripts force TAU_MIDI_ENABLED=false in test mode.
+        # Start Tau directly in test mode so caller-provided MIDI flags are honored.
+        if self.tau_env == "test":
+            if "windows" in sysname:
+                cmd = ["cmd", "/c", "mix run --no-halt"]
+            else:
+                cmd = ["sh", "-lc", "mix run --no-halt"]
+        elif "windows" in sysname:
             cmd = ["cmd", "/c", "boot-win.bat"]
         elif "darwin" in sysname:
             cmd = ["sh", "boot-mac.sh"]
